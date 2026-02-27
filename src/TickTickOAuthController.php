@@ -3,6 +3,7 @@
 namespace OpenCompany\AiToolTickTick;
 
 use App\Models\IntegrationSetting;
+use App\Models\Workspace;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controller;
 use Illuminate\Support\Facades\Http;
@@ -15,11 +16,14 @@ class TickTickOAuthController extends Controller
      */
     public function authorize(Request $request)
     {
+        $workspaceSlug = $this->resolveWorkspaceSlug();
+        $request->session()->put('ticktick_oauth_workspace_slug', $workspaceSlug);
+
         $setting = IntegrationSetting::where('integration_id', 'ticktick')->first();
         $clientId = $setting?->getConfigValue('client_id');
 
         if (! $clientId) {
-            return redirect('/settings?tab=integrations')
+            return redirect($this->settingsUrl($workspaceSlug))
                 ->with('error', 'TickTick Client ID is not configured. Save your Client ID first.');
         }
 
@@ -46,9 +50,10 @@ class TickTickOAuthController extends Controller
     public function callback(Request $request)
     {
         $storedState = $request->session()->pull('ticktick_oauth_state');
+        $workspaceSlug = $request->session()->pull('ticktick_oauth_workspace_slug');
 
         if (! $storedState || $storedState !== $request->input('state')) {
-            return redirect('/settings?tab=integrations')
+            return redirect($this->settingsUrl($workspaceSlug))
                 ->with('error', 'Invalid OAuth state. Please try connecting again.');
         }
 
@@ -56,13 +61,13 @@ class TickTickOAuthController extends Controller
         if (! $code) {
             $error = $request->input('error_description', $request->input('error', 'No authorization code received.'));
 
-            return redirect('/settings?tab=integrations')
+            return redirect($this->settingsUrl($workspaceSlug))
                 ->with('error', "TickTick authorization failed: {$error}");
         }
 
         $setting = IntegrationSetting::where('integration_id', 'ticktick')->first();
         if (! $setting) {
-            return redirect('/settings?tab=integrations')
+            return redirect($this->settingsUrl($workspaceSlug))
                 ->with('error', 'TickTick integration not found. Save your Client ID and Secret first.');
         }
 
@@ -85,7 +90,7 @@ class TickTickOAuthController extends Controller
             if (! $response->successful()) {
                 $error = $response->json('error_description') ?? $response->json('error') ?? $response->body();
 
-                return redirect('/settings?tab=integrations')
+                return redirect($this->settingsUrl($workspaceSlug))
                     ->with('error', 'Failed to exchange token: ' . (is_string($error) ? $error : json_encode($error)));
             }
 
@@ -93,7 +98,7 @@ class TickTickOAuthController extends Controller
             $accessToken = $data['access_token'] ?? null;
 
             if (! $accessToken) {
-                return redirect('/settings?tab=integrations')
+                return redirect($this->settingsUrl($workspaceSlug))
                     ->with('error', 'No access token in response.');
             }
 
@@ -104,10 +109,10 @@ class TickTickOAuthController extends Controller
             $setting->enabled = true;
             $setting->save();
 
-            return redirect('/settings?tab=integrations')
+            return redirect($this->settingsUrl($workspaceSlug))
                 ->with('success', 'TickTick connected successfully.');
         } catch (\Throwable $e) {
-            return redirect('/settings?tab=integrations')
+            return redirect($this->settingsUrl($workspaceSlug))
                 ->with('error', 'OAuth token exchange failed: ' . $e->getMessage());
         }
     }
@@ -125,5 +130,30 @@ class TickTickOAuthController extends Controller
         }
 
         return 'https://ticktick.com';
+    }
+
+    /**
+     * Resolve the current workspace slug from session.
+     */
+    private function resolveWorkspaceSlug(): ?string
+    {
+        $workspaceId = session('current_workspace_id');
+        if ($workspaceId) {
+            return Workspace::where('id', $workspaceId)->value('slug');
+        }
+
+        return null;
+    }
+
+    /**
+     * Build the settings URL with workspace prefix.
+     */
+    private function settingsUrl(?string $workspaceSlug): string
+    {
+        if ($workspaceSlug) {
+            return "/w/{$workspaceSlug}/settings?tab=integrations";
+        }
+
+        return '/settings?tab=integrations';
     }
 }

@@ -34,7 +34,7 @@ class AiToolTickTickServiceProvider extends ServiceProvider
     private function registerRoutes(): void
     {
         Route::prefix('api/integrations/ticktick/oauth')
-            ->middleware('web')
+            ->middleware(['web', 'auth'])
             ->group(function () {
                 Route::get('authorize', [TickTickOAuthController::class, 'authorize']);
                 Route::get('callback', [TickTickOAuthController::class, 'callback']);
